@@ -19,7 +19,7 @@ contract Profiles is Ownable {
     }
 
     struct SuperEndorsement {
-        address endorser;
+        address endorsed;
         uint8 x;
         uint8 y;
         string message;
@@ -76,8 +76,8 @@ contract Profiles is Ownable {
     ) external {
         require(x < 4 && y < 4, "Invalid matrix position");
         uint8 index = y * 4 + x;
-        users[target].superMatrix[index] = SuperEndorsement({
-            endorser: _msgSender(),
+        users[_msgSender()].superMatrix[index] = SuperEndorsement({
+            endorsed: target,
             x: x,
             y: y,
             message: message
