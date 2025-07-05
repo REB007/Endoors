@@ -56,17 +56,17 @@ contract Profiles is Ownable, SelfVerificationRoot {
 
     
     function getConfigId(
-        bytes32 destinationChainId,
-        bytes32 userIdentifier, 
-        bytes memory userDefinedData // Custom data from the qr code configuration
+        bytes32 _destinationChainId,
+        bytes32 _userIdentifier, 
+        bytes memory _userDefinedData // Custom data from the qr code configuration
     ) public view override returns (bytes32) {
         return configId;
     }
 
     // Override to handle successful verification
     function customVerificationHook(
-        ISelfVerificationRoot.GenericDiscloseOutputV2 memory output,
-        bytes memory userData
+        ISelfVerificationRoot.GenericDiscloseOutputV2 memory _output,
+        bytes memory _userData
     ) internal virtual override {
         
         // Create an empty verified User for the sender
@@ -107,6 +107,10 @@ contract Profiles is Ownable, SelfVerificationRoot {
 
 
     // --- Admin / Setup Functions (for testing) ---
+
+    function setConfigId(bytes32 _configId) external onlyOwner {
+        configId = _configId;
+    }
 
     function setSkill(
         address user,
