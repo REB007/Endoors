@@ -1,0 +1,3 @@
+
+{"chainId":44787,"type":"DEPLOYMENT_INITIALIZE"}
+{"artifactId":"ProfilesSystem#Profiles","constructorArgs":["0x68c931C9a534D37aa78094877F46fE46a49F1A51",1.9578719266358897e+76],"contractName":"Profiles","dependencies":[],"from":"0x03965d53b441d26239c224c4adce351731b3f05f","futureId":"ProfilesSystem#Profiles","futureType":"NAMED_ARTIFACT_CONTRACT_DEPLOYMENT","libraries":{},"strategy":"basic","strategyConfig":{},"type":"DEPLOYMENT_EXECUTION_STATE_INITIALIZE","value":{"_kind":"bigint","value":"0"}}

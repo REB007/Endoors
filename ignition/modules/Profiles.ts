@@ -9,22 +9,45 @@ const IDENTITY_VERIFICATION_HUB_V2 = {
 
 // Self verification scope ID
 // This should be obtained from Self when setting up your verification flow
-const SELF_SCOPE_ID = 545502472891597700948915214426866708361168993393227193875317823653822637619; // Replace with your actual scope ID
+// Using BigInt format to prevent overflow
+const SELF_SCOPE_ID = "19578719266358898482253637888479350468064771842551764650421044070323271096743"; // Replace with your actual scope ID
 
 // Config ID for the verification flow
 const CONFIG_ID = "0x7b6436b0c98f62380866d9432c2af0ee08ce16a171bda6951aecd95ee1307d61"; // Replace with your actual config ID
 
-export const ProfilesModule = buildModule("Profiles", (m) => {
+export const ProfilesModule = buildModule("ProfilesSystemV2", (m) => {
+  // Get the hub address parameter with a default value
+  const hubAddress = m.getParameter("identityVerificationHub", IDENTITY_VERIFICATION_HUB_V2.testnet);
+  const scopeId = m.getParameter("scope", SELF_SCOPE_ID);
   
-  // Deploy the Profiles contract
+  // Step 1: Deploy the Profiles contract
   const profiles = m.contract("Profiles", [
-    // Use a parameter for the hub address with a default value of localhost
-    m.getParameter("identityVerificationHub", IDENTITY_VERIFICATION_HUB_V2.testnet),
-    m.getParameter("scope", SELF_SCOPE_ID),
+    hubAddress,
+    scopeId,
   ]);
 
-  // Set the config ID after deployment
-  m.call(profiles, "configId", [CONFIG_ID], { id: "setConfigId" });
+  // Step 2: Deploy the PrivacyEndorser contract with a dependency on Profiles
+  const privacyEndorser = m.contract("PrivacyEndorser", [
+    hubAddress,
+    scopeId,
+    // Reference the Profiles contract
+    profiles
+  ]);
 
-  return { profiles };
+  // Step 3: Set the PrivacyEndorser address in the Profiles contract
+  m.call(profiles, "setPrivacyEndorser", [privacyEndorser], { 
+    id: "setPrivacyEndorserInProfiles" 
+  });
+
+  // Step 4: Set the config ID for both contracts
+  m.call(profiles, "setConfigId", [CONFIG_ID], { 
+    id: "setProfilesConfigId" 
+  });
+  
+  m.call(privacyEndorser, "setConfigId", [CONFIG_ID], { 
+    id: "setPrivacyEndorserConfigId" 
+  });
+
+  // Return both contract instances so their addresses will be displayed in the deployment output
+  return { profiles, privacyEndorser };
 });

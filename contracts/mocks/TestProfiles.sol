@@ -38,4 +38,12 @@ contract TestProfiles is Profiles {
     function isVerified(address user) external view returns (bool) {
         return users[user].verified;
     }
+    
+    /**
+     * @dev Test function to get the identity verification hub address
+     * @return address The address of the identity verification hub
+     */
+    function getIdentityVerificationHubV2() external view returns (address) {
+        return address(_identityVerificationHubV2);
+    }
 }

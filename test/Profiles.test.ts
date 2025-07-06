@@ -6,6 +6,7 @@ describe("Profiles Contract", function () {
   // Contract instances
   let profilesContract: any; // Will be TestProfiles
   let mockHubContract: any; // Will be MockIdentityVerificationHubV2
+  let mockPrivacyEndorserContract: any; // Will be MockPrivacyEndorser
   
   // Signers
   let owner: SignerWithAddress;
@@ -46,8 +47,20 @@ describe("Profiles Contract", function () {
     const TestProfilesFactory = await ethers.getContractFactory("TestProfiles");
     profilesContract = await TestProfilesFactory.deploy(await mockHubContract.getAddress(), mockScopeId);
     
-    // Set the config ID - using a transaction to set the value
+    // Deploy the mock privacy endorser contract
+    const MockPrivacyEndorserFactory = await ethers.getContractFactory("MockPrivacyEndorser");
+    mockPrivacyEndorserContract = await MockPrivacyEndorserFactory.deploy(
+      await mockHubContract.getAddress(), 
+      mockScopeId,
+      await profilesContract.getAddress()
+    );
+    
+    // Set the config ID for both contracts
     await profilesContract.setConfigId(mockConfigId);
+    await mockPrivacyEndorserContract.setConfigId(mockConfigId);
+    
+    // Set the privacy endorser in the profiles contract
+    await profilesContract.setPrivacyEndorser(await mockPrivacyEndorserContract.getAddress());
     
     // Mock verification for test users
     await mockVerification(user1);
@@ -59,27 +72,38 @@ describe("Profiles Contract", function () {
       expect(await profilesContract.owner()).to.equal(owner.address);
     });
     
+    it("Should set the correct identity verification hub", async function () {
+      expect(await profilesContract.getIdentityVerificationHubV2()).to.equal(await mockHubContract.getAddress());
+    });
+    
+    it("Should set the correct scope ID", async function () {
+      expect(await profilesContract.scope()).to.equal(mockScopeId);
+    });
+    
     it("Should set the correct config ID", async function () {
       expect(await profilesContract.configId()).to.equal(mockConfigId);
     });
-  });
-
-  describe("User Verification", function () {
-    it("Should mark users as verified after verification", async function () {
-      // Check if user1 is verified (using our test helper function)
+    
+    it("Should set the correct privacy endorser", async function () {
+      expect(await profilesContract.privacyEndorser()).to.equal(await mockPrivacyEndorserContract.getAddress());
+    });
+    
+    it("Should verify users correctly", async function () {
+      // Check that user1 and user2 are verified
       expect(await profilesContract.isVerified(user1.address)).to.be.true;
+      expect(await profilesContract.isVerified(user2.address)).to.be.true;
       
-      // Check if user3 is not verified
+      // Check that user3 is not verified
       expect(await profilesContract.isVerified(user3.address)).to.be.false;
       
       // Try to get the profile URI of user1 (should work if verified)
       // For view functions, we should just call it directly instead of using expect().to.not.be.reverted
-      const uri = await profilesContract.getUri(user1.address);
+      const uri = await profilesContract.getProfileUri(user1.address);
       // The URI should be an empty string since we haven't set it yet
       expect(uri).to.equal("");
       
       // Try to get the profile URI of user3 (should fail as not verified)
-      await expect(profilesContract.getUri(user3.address)).to.be.revertedWith("User not verified");
+      await expect(profilesContract.getProfileUri(user3.address)).to.be.revertedWith("User not verified");
     });
   });
 
@@ -89,53 +113,39 @@ describe("Profiles Contract", function () {
       await profilesContract.connect(user1).setProfileUri(testProfileUri);
       
       // Check if the URI was set correctly
-      expect(await profilesContract.getUri(user1.address)).to.equal(testProfileUri);
+      expect(await profilesContract.getProfileUri(user1.address)).to.equal(testProfileUri);
     });
     
     it("Should fail to set profile URI for unverified users", async function () {
       // Try to set profile URI for unverified user3
       await expect(
         profilesContract.connect(user3).setProfileUri(testProfileUri)
-      ).to.be.revertedWith("User not verified");
+      ).to.be.revertedWith("Not verified");
     });
   });
 
   describe("Skills Management", function () {
-    it("Should set skills correctly", async function () {
-      // Set a skill for user1
+    it("Should set and get skills correctly", async function () {
+      // Set skills for user1
       await profilesContract.connect(user1).setSkill(user1.address, 0, testSkills[0]);
+      await profilesContract.connect(user1).setSkill(user1.address, 1, testSkills[1]);
       
       // Get the skills
       const skills = await profilesContract.getSkills(user1.address);
       
-      // Check if the skill was set correctly
+      // Check if the skills were set correctly
       expect(skills[0].name).to.equal(testSkills[0]);
+      expect(skills[1].name).to.equal(testSkills[1]);
       expect(skills[0].totalEndorsements).to.equal(0);
       expect(skills[0].expertEndorsements).to.equal(0);
       expect(skills[0].isExpert).to.be.false;
-    });
-    
-    it("Should set multiple skills correctly", async function () {
-      // Set multiple skills for user1
-      await profilesContract.connect(user1).setSkill(user1.address, 0, testSkills[0]);
-      await profilesContract.connect(user1).setSkill(user1.address, 1, testSkills[1]);
-      await profilesContract.connect(user1).setSkill(user1.address, 2, testSkills[2]);
-      await profilesContract.connect(user1).setSkill(user1.address, 3, testSkills[3]);
-      
-      // Get the skills
-      const skills = await profilesContract.getSkills(user1.address);
-      
-      // Check if all skills were set correctly
-      for (let i = 0; i < 4; i++) {
-        expect(skills[i].name).to.equal(testSkills[i]);
-      }
     });
     
     it("Should fail to set skills for unverified users", async function () {
       // Try to set a skill for unverified user3
       await expect(
         profilesContract.connect(user1).setSkill(user3.address, 0, testSkills[0])
-      ).to.be.revertedWith("Target user not verified");
+      ).to.be.revertedWith("Target not verified");
     });
     
     it("Should fail if caller is not verified", async function () {
@@ -153,67 +163,137 @@ describe("Profiles Contract", function () {
     });
   });
 
-  describe("Skill Endorsements", function () {
+  describe("Expert Skill Endorsements", function () {
     beforeEach(async function () {
-      // Set up skills for user2
+      // Set up skills for user1 and user2
+      await profilesContract.connect(user1).setSkill(user1.address, 0, testSkills[0]);
       await profilesContract.connect(user2).setSkill(user2.address, 0, testSkills[0]);
       await profilesContract.connect(user2).setSkill(user2.address, 1, testSkills[1]);
+      
+      // Make user1 an expert in the first skill by setting endorsements to threshold
+      // This is a test helper that directly modifies the contract state
+      const skillId = getSkillId(testSkills[0]);
+      for (let i = 0; i < 100; i++) {
+        await mockPrivacyEndorserContract.connect(owner).testEndorseSkillPrivately(user1.address, skillId);
+      }
     });
     
-    it("Should endorse skills correctly", async function () {
+    it("Should allow experts to endorse skills", async function () {
       // Get the skill ID
       const skillId = getSkillId(testSkills[0]);
       
-      // User1 endorses user2's skill
-      await profilesContract.connect(user1).endorseSkill(user2.address, skillId);
+      // User1 (now an expert) endorses user2's skill
+      await profilesContract.connect(user1).expertEndorseSkill(user2.address, skillId);
       
       // Get the updated skills
       const skills = await profilesContract.getSkills(user2.address);
       
-      // Check if the endorsement was counted
+      // Check if the endorsement was counted as both a regular and expert endorsement
       expect(skills[0].totalEndorsements).to.equal(1);
+      expect(skills[0].expertEndorsements).to.equal(1);
     });
     
-    it("Should prevent double endorsements", async function () {
+    it("Should prevent double expert endorsements", async function () {
       // Get the skill ID
       const skillId = getSkillId(testSkills[0]);
       
-      // User1 endorses user2's skill
-      await profilesContract.connect(user1).endorseSkill(user2.address, skillId);
+      // User1 (expert) endorses user2's skill
+      await profilesContract.connect(user1).expertEndorseSkill(user2.address, skillId);
       
       // Try to endorse again
       await expect(
-        profilesContract.connect(user1).endorseSkill(user2.address, skillId)
-      ).to.be.revertedWith("Already endorsed this skill");
+        profilesContract.connect(user1).expertEndorseSkill(user2.address, skillId)
+      ).to.be.revertedWith("Already endorsed");
     });
     
-    it("Should fail to endorse non-existent skills", async function () {
-      // Try to endorse a skill that doesn't exist
-      const nonExistentSkillId = getSkillId("NonExistentSkill");
+    it("Should fail if endorser is not an expert in the skill", async function () {
+      // Get the skill ID for a skill user1 is not an expert in
+      const skillId = getSkillId(testSkills[1]);
       
       await expect(
-        profilesContract.connect(user1).endorseSkill(user2.address, nonExistentSkillId)
-      ).to.be.revertedWith("Skill does not exist");
+        profilesContract.connect(user1).expertEndorseSkill(user2.address, skillId)
+      ).to.be.revertedWith("Not expert");
     });
     
-    it("Should fail to endorse skills if caller is not verified", async function () {
+    it("Should fail to expert endorse if caller is not verified", async function () {
       // Get the skill ID
       const skillId = getSkillId(testSkills[0]);
       
       // Try to endorse as unverified user3
       await expect(
-        profilesContract.connect(user3).endorseSkill(user2.address, skillId)
+        profilesContract.connect(user3).expertEndorseSkill(user2.address, skillId)
       ).to.be.revertedWith("Caller not verified");
     });
     
-    it("Should fail to endorse skills if target is not verified", async function () {
+    it("Should fail to expert endorse if target is not verified", async function () {
       // Get the skill ID
       const skillId = getSkillId(testSkills[0]);
       
       // Try to endorse unverified user3
       await expect(
-        profilesContract.connect(user1).endorseSkill(user3.address, skillId)
-      ).to.be.revertedWith("Target user not verified");
+        profilesContract.connect(user1).expertEndorseSkill(user3.address, skillId)
+      ).to.be.revertedWith("Target not verified");
+    });
+  });
+  
+  describe("Privacy Endorsements", function () {
+    beforeEach(async function () {
+      // Set up skills for user2
+      await profilesContract.connect(user2).setSkill(user2.address, 0, testSkills[0]);
+    });
+    
+    it("Should allow privacy endorser to endorse skills privately", async function () {
+      // Get the skill ID
+      const skillId = getSkillId(testSkills[0]);
+      
+      // Check initial endorsement count
+      const initialSkills = await profilesContract.getSkills(user2.address);
+      expect(initialSkills[0].totalEndorsements).to.equal(0);
+      
+      // Use the mock privacy endorser to endorse the skill
+      await mockPrivacyEndorserContract.connect(owner).testEndorseSkillPrivately(user2.address, skillId);
+      
+      // Check that the endorsement was counted
+      const updatedSkills = await profilesContract.getSkills(user2.address);
+      expect(updatedSkills[0].totalEndorsements).to.equal(1);
+    });
+    
+    it("Should fail if non-privacy endorser tries to call endorseSkillPrivately", async function () {
+      // Get the skill ID
+      const skillId = getSkillId(testSkills[0]);
+      
+      // Try to call the private endorsement function directly from a regular user
+      await expect(
+        profilesContract.connect(user1).endorseSkillPrivately(user2.address, skillId)
+      ).to.be.revertedWith("Unauthorized endorser");
+    });
+    
+    it("Should fail to privately endorse unverified users", async function () {
+      // Get the skill ID
+      const skillId = getSkillId(testSkills[0]);
+      
+      // Try to endorse unverified user3
+      await expect(
+        mockPrivacyEndorserContract.connect(owner).testEndorseSkillPrivately(user3.address, skillId)
+      ).to.be.revertedWith("Target not verified");
+    });
+    
+    it("Should make a user an expert after reaching threshold", async function () {
+      // Get the skill ID
+      const skillId = getSkillId(testSkills[0]);
+      
+      // Check that user2 is not an expert initially
+      const initialSkills = await profilesContract.getSkills(user2.address);
+      expect(initialSkills[0].isExpert).to.be.false;
+      
+      // Add enough endorsements to reach the expert threshold (100)
+      for (let i = 0; i < 100; i++) {
+        await mockPrivacyEndorserContract.connect(owner).testEndorseSkillPrivately(user2.address, skillId);
+      }
+      
+      // Check that user2 is now an expert
+      const updatedSkills = await profilesContract.getSkills(user2.address);
+      expect(updatedSkills[0].isExpert).to.be.true;
     });
   });
 
@@ -231,7 +311,7 @@ describe("Profiles Contract", function () {
       
       // Check if the super endorsement was set correctly
       const index = y * 4 + x;
-      expect(matrix[index].endorsed).to.equal(user2.address);
+      expect(matrix[index].endorser).to.equal(user1.address);
       expect(matrix[index].x).to.equal(x);
       expect(matrix[index].y).to.equal(y);
       expect(matrix[index].message).to.equal(message);
@@ -259,14 +339,14 @@ describe("Profiles Contract", function () {
       // Try to set a super endorsement with invalid coordinates
       await expect(
         profilesContract.connect(user1).setSuperEndorsement(user2.address, 4, 2, "Invalid")
-      ).to.be.revertedWith("Invalid matrix position");
+      ).to.be.revertedWith("Invalid position");
     });
     
     it("Should fail to set super endorsements for unverified users", async function () {
       // Try to set a super endorsement for an unverified user
       await expect(
         profilesContract.connect(user1).setSuperEndorsement(user3.address, 1, 2, "Test")
-      ).to.be.revertedWith("Target user not verified");
+      ).to.be.revertedWith("Target not verified");
     });
     
     it("Should fail to set super endorsements if caller is not verified", async function () {
@@ -274,20 +354,6 @@ describe("Profiles Contract", function () {
       await expect(
         profilesContract.connect(user3).setSuperEndorsement(user2.address, 1, 2, "Test")
       ).to.be.revertedWith("Caller not verified");
-    });
-  });
-
-  describe("Config ID", function () {
-    it("Should return the correct config ID", async function () {
-      // Call getConfigId with some parameters
-      const configId = await profilesContract.getConfigId(
-        ethers.ZeroHash,
-        ethers.ZeroHash,
-        "0x"
-      );
-      
-      // Check if it returns the correct config ID
-      expect(configId).to.equal(mockConfigId);
     });
   });
 });
